@@ -1,0 +1,1 @@
+{"dependencies":{"modal":"^0.11.2"},"description":"EHSR scheduler on Vercel (Node.js runtime): dispatches JHenTai SR jobs across Modal accounts using the Modal JS SDK for container stats.","name":"jh-super-resolution-scheduler","private":true,"version":"1.0.0"}
