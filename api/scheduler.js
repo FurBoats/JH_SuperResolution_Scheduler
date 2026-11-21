@@ -40,9 +40,11 @@
 //      "modalTokenId":"ak-...",
 //      "modalTokenSecret":"as-...",
 //      "modalApp":"jh-super-resolution",
-//      "modalFunction":"Backend"}
+//      "modalFunction":"Backend",
+//      "modalMethod":"serve"}
 //     gpuRatePerSec：T4=0.000164，L4=0.000222，A10=0.000306
-//     modalApp / modalFunction 可省略，默认就是上面这两个值。
+//     modalApp / modalFunction / modalMethod 可省略，默认就是上面这组值
+//     （modalFunction 是 Cls 类名，modalMethod 是它的 web_server 方法名）。
 //     modalTokenId/Secret：在 Modal 账号 Settings → API Tokens 里建。
 //     不填 token 也能跑：stats 视为未知，全靠探活判断（退化为纯探活版）。
 //
@@ -197,8 +199,9 @@ async function getRunners(account) {
     lastStatsErrors[account.id] = '未配置 modal token';
     return null;
   }
+  const appName = account.modalApp || 'jh-super-resolution';
   const base = account.modalFunction || 'Backend';
-  const names = [...new Set([base, `${base}.serve`])];
+  const methodName = account.modalMethod || 'serve';
   let client;
   try {
     client = new ModalClient({
@@ -207,19 +210,27 @@ async function getRunners(account) {
       timeoutMs: 15000,
       maxRetries: 1,
     });
+    // 后端是 Modal 的 Cls：JS SDK 不许用 functions.fromName 取 Cls 方法，
+    // 必须走 cls.fromName -> instance() -> method("serve")。
+    // 普通函数部署时退回 functions.fromName。
+    const attempts = [
+      async () => {
+        const cls = await client.cls.fromName(appName, base);
+        const instance = await cls.instance();
+        return instance.method(methodName);
+      },
+      async () => client.functions.fromName(appName, base),
+    ];
     let lastErr = null;
-    for (const name of names) {
+    for (const attempt of attempts) {
       try {
-        const fn = await client.functions.fromName(
-          account.modalApp || 'jh-super-resolution',
-          name,
-        );
+        const fn = await attempt();
         const stats = await fn.getCurrentStats();
         if (stats && typeof stats.numTotalRunners === 'number') {
           delete lastStatsErrors[account.id];
           return stats.numTotalRunners;
         }
-        lastErr = new Error(`${name}: 返回里没有 numTotalRunners`);
+        lastErr = new Error('返回里没有 numTotalRunners');
       } catch (e) {
         lastErr = e;
       }
