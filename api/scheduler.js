@@ -190,24 +190,45 @@ async function refreshUsageCache(account) {
 
 // ---------------- Modal stats / 探活 / 唤醒 / 签会话 ----------------
 
+const lastStatsErrors = {}; // accountId -> 最近一次 stats 失败原因（状态页展示）
+
 async function getRunners(account) {
-  if (!account.modalTokenId || !account.modalTokenSecret) return null;
+  if (!account.modalTokenId || !account.modalTokenSecret) {
+    lastStatsErrors[account.id] = '未配置 modal token';
+    return null;
+  }
+  const base = account.modalFunction || 'Backend';
+  const names = [...new Set([base, `${base}.serve`])];
   let client;
   try {
     client = new ModalClient({
       tokenId: account.modalTokenId,
       tokenSecret: account.modalTokenSecret,
-      timeoutMs: 8000,
+      timeoutMs: 15000,
       maxRetries: 1,
     });
-    const fn = await client.functions.fromName(
-      account.modalApp || 'jh-super-resolution',
-      account.modalFunction || 'Backend',
-    );
-    const stats = await fn.getCurrentStats();
-    return typeof stats.numTotalRunners === 'number' ? stats.numTotalRunners : null;
-  } catch {
+    let lastErr = null;
+    for (const name of names) {
+      try {
+        const fn = await client.functions.fromName(
+          account.modalApp || 'jh-super-resolution',
+          name,
+        );
+        const stats = await fn.getCurrentStats();
+        if (stats && typeof stats.numTotalRunners === 'number') {
+          delete lastStatsErrors[account.id];
+          return stats.numTotalRunners;
+        }
+        lastErr = new Error(`${name}: 返回里没有 numTotalRunners`);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    lastStatsErrors[account.id] = String((lastErr && lastErr.message) || lastErr || 'unknown error').slice(0, 300);
     return null; // 查不到就当未知，靠探活兜底
+  } catch (e) {
+    lastStatsErrors[account.id] = String((e && e.message) || e).slice(0, 300);
+    return null;
   } finally {
     try {
       if (client) client.close();
@@ -368,9 +389,11 @@ async function rootPage(res) {
   const probed = await Promise.all(accounts.map(probe));
   for (const p of probed) {
     const r = await remainingUsd(p.account);
-    lines.push(
-      `- ${p.account.id}: runners=${p.runners === null ? '?' : p.runners} tunnel=${p.up ? 'up' : 'down'} remaining ≈ $${r.toFixed(2)} / $${Number(p.account.monthlyCreditUsd) || 30}`,
-    );
+    let line = `- ${p.account.id}: runners=${p.runners === null ? '?' : p.runners} tunnel=${p.up ? 'up' : 'down'} remaining ≈ $${r.toFixed(2)} / $${Number(p.account.monthlyCreditUsd) || 30}`;
+    if (p.runners === null && lastStatsErrors[p.account.id]) {
+      line += ` statsError=${lastStatsErrors[p.account.id]}`;
+    }
+    lines.push(line);
   }
   res.status(200).setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.send(lines.join('\n'));
