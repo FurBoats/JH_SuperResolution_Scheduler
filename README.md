@@ -36,10 +36,11 @@ Node.js runtime, which is the default for `api/` functions.)
       "modalTokenId": "ak-...",
       "modalTokenSecret": "as-...",
       "modalApp": "jh-super-resolution",
-      "modalFunction": "Backend"}
+      "modalFunction": "Backend",
+      "modalMethod": "serve"}
      ```
      `gpuRatePerSec`: T4 = 0.000164, L4 = 0.000222, A10 = 0.000306.
-     `modalApp` / `modalFunction` default to the values above and can
+     `modalApp` / `modalFunction` / `modalMethod` default to the values above and can
      be omitted. API tokens are created in each Modal account under
      Settings → API Tokens. Leaving the token fields out also works —
      stats are then unknown and the scheduler falls back to pure
@@ -63,7 +64,7 @@ Node.js runtime, which is the default for `api/` functions.)
 |---|---|
 | `POST /resolution_img` | Ask for a backend: `200 {state:"ready", backendUrl, sessionId}` or `202 {state:"waking", dispatchId}` |
 | `GET /resolution_img/status?dispatchId=…` | Poll a waking dispatch until `ready` / `error` |
-| `GET /` | Plain-text status page: per-account runner count, tunnel state, remaining-credit estimate |
+| `GET /status?key=<CLIENT_KEY>` | Plain-text status page: per-account runner count, tunnel state, remaining-credit estimate. The root path `/` itself returns 404 — the page is not public |
 
 All dispatch routes require the `X-Client-Key` header.
 
@@ -77,10 +78,12 @@ All dispatch routes require the `X-Client-Key` header.
 - Polling during one wake costs roughly one invocation every few
   seconds — far inside Hobby quotas at personal scale.
 
-## Known unverified point
+## Stats lookup note
 
-`getCurrentStats()` is queried on the backend's `Backend` class
-function. If a future Modal SDK renames things, the stats call fails
-soft (treated as "unknown") and dispatch continues on tunnel probing
-alone — watch the `/` status page: `runners=?` for every account
-means stats are not coming through.
+The backend is a Modal **Cls**, and the JS SDK refuses
+`functions.fromName()` for Cls methods — stats are read through
+`cls.fromName(app, "Backend")` → `instance()` → `method("serve")`
+→ `getCurrentStats()` (verified live 2026-11-21). If stats ever fail,
+the error text shows on the status page as `statsError=…`, dispatch
+falls back to tunnel probing alone, and `runners=?` marks the
+affected account.

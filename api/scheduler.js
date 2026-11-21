@@ -56,7 +56,7 @@
 //     -> 200 {"state":"waking"}
 //     -> 200 {"state":"ready","backendUrl":"...","sessionId":"..."}
 //     -> 200 {"state":"error","error":"..."}
-//   GET  /                          纯文本状态页（人工核对用）
+//   GET  /status?key=<CLIENT_KEY>   纯文本状态页（根路径直接 404，不公开）
 // ============================================================================
 
 const crypto = require('crypto');
@@ -416,6 +416,10 @@ module.exports = async (req, res) => {
   const route = (req.query && req.query.route) || '';
   try {
     if (route === 'root' && req.method === 'GET') {
+      // 状态页不公开：必须带 ?key=<CLIENT_KEY>，否则一律 404
+      if (!process.env.CLIENT_KEY || req.query.key !== process.env.CLIENT_KEY) {
+        return sendJson(res, 404, { error: 'not found' });
+      }
       return await rootPage(res);
     }
     if (route === 'dispatch' || route === 'status') {
